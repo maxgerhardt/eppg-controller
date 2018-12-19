@@ -164,10 +164,30 @@ void initDisplay() {
 }
 
 void handleThrottle() {
-  pot.update();
-  int rawval = pot.getValue();
-  int val = map(rawval, 0, 4095, 1110, 2000); // mapping val to minimum and maximum
+  int raw_throttle;
+  if (shouldCruise) {
+    raw_throttle = last_throttle;
+  }else{
+    pot.update();
+    raw_throttle = pot.getValue();    
+  }
+
+  int val = map(raw_throttle, 0, 4095, 1110, 2000); // mapping val to minimum and maximum
   esc.writeMicroseconds(val); // using val as the signal to esc
+}
+
+bool shouldCruise() {
+  if (!FEATURE_CRUISE) return false;
+
+  int crusing_secs = (millis() - cruisedAtMilis) / 1000;
+
+  if (crusing_secs > CRUISE_GRACE && !throttleSafe()) return false;
+  if (crusing_secs >= CRUISE_MAX) return false;
+  return true;
+}
+
+void engageCruise(){
+  cruisedAtMilis = millis();
 }
 
 void armSystem(){
