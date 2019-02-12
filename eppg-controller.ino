@@ -26,7 +26,7 @@ using namespace ace_button;
 #define THROTTLE_PIN  A0  // throttle pot input
 
 #define FEATURE_AUTO_PAGING   false // use button by default to change page
-#define FEATURE_CRUISE false
+#define FEATURE_CRUISE true
 
 #define CRUISE_GRACE 2 // 2 sec period to get off throttle
 #define CRUISE_MAX 300 // 5 min max cruising
@@ -45,6 +45,7 @@ AdjustableButtonConfig buttonConfig;
 const int bgInterval = 750;  // background updates (milliseconds)
 
 bool armed = false;
+bool mode_cruise = false;
 int page = 0;
 unsigned long armedAtMilis = 0;
 unsigned long cruisedAtMilis = 0;
@@ -75,7 +76,7 @@ void setup() {
   buttonConfig.setEventHandler(handleButtonEvent);
   buttonConfig.setFeature(ButtonConfig::kFeatureDoubleClick);
   buttonConfig.setFeature(ButtonConfig::kFeatureSuppressAfterClick);
-  buttonConfig.setFeature(ButtonConfig::kFeatureSuppressAfterDoubleClick);
+  buttonConfig.setFeature(ButtonConfig::kFeatureLongPress);
   buttonConfig.setLongPressDelay(2500);
 
   initDisplay();
@@ -165,29 +166,61 @@ void initDisplay() {
 
 void handleThrottle() {
   int raw_throttle;
-  if (shouldCruise) {
+  if (shouldCruise()) {
     raw_throttle = last_throttle;
   }else{
     pot.update();
-    raw_throttle = pot.getValue();    
+    raw_throttle = pot.getValue();
+    last_throttle = raw_throttle;
   }
-
+  //Serial.print(raw_throttle);
   int val = map(raw_throttle, 0, 4095, 1110, 2000); // mapping val to minimum and maximum
   esc.writeMicroseconds(val); // using val as the signal to esc
 }
 
 bool shouldCruise() {
   if (!FEATURE_CRUISE) return false;
+  if (!mode_cruise) return false;
+  if (!armed) {
+    Serial.println(F("no cruise because disarmed"));
+    return false;
+  }
 
   int crusing_secs = (millis() - cruisedAtMilis) / 1000;
+  Serial.println(crusing_secs);
 
-  if (crusing_secs > CRUISE_GRACE && !throttleSafe()) return false;
-  if (crusing_secs >= CRUISE_MAX) return false;
+  if (crusing_secs > CRUISE_GRACE && !throttleSafe()) { 
+    Serial.println(F("no cruise because throttle input"));
+    return false;
+  }
+  if (crusing_secs >= CRUISE_MAX) {
+    Serial.println(F("no cruise because max time"));
+    return false;
+  }
   return true;
 }
 
-void engageCruise(){
+bool engageCruise(){
+   if (throttleSafe()) { 
+    Serial.println("no point in cruise at 0");
+    return false; //no point in cruise at 0
+  }
+  
+  if (shouldCruise) {
+    mode_cruise = true;
+  }else{
+    unsigned int no_cruise_melody[] = { 1760, 1760, 1560 };
+    mode_cruise = false;
+    playMelody(no_cruise_melody, 3);
+    return false;
+  }
+  mode_cruise = true;
+  unsigned int cruise_melody[] = { 2093, 2093, 2293 };
+    playMelody(cruise_melody, 3);
+
+  Serial.println(F("engaging cruise"));
   cruisedAtMilis = millis();
+  return true;
 }
 
 void armSystem(){
@@ -219,6 +252,16 @@ void handleButtonEvent(AceButton *button, uint8_t eventType, uint8_t buttonState
     Serial.println(F("normal clicked"));
     if(pin == BUTTON_TOP) nextPage();
     break;
+  case AceButton::kEventLongPressed:
+    Serial.println(F("long pressed"));
+    if(pin == BUTTON_SIDE) {
+      if (mode_cruise){
+        mode_cruise = false;
+      }else {
+        engageCruise();
+      }
+    }
+    break;
   case AceButton::kEventDoubleClicked:
     Serial.print(F("double clicked "));
     if(pin == BUTTON_SIDE){
@@ -240,9 +283,9 @@ void handleButtonEvent(AceButton *button, uint8_t eventType, uint8_t buttonState
 // Returns true if the throttle/pot is below the safe threshold
 bool throttleSafe() {
   pot.update();
-  Serial.println(pot.getValue());
+  // Serial.println(pot.getValue());
   if (pot.getValue() < 100) {
-        Serial.println(F("safe pot"));
+    Serial.println(F("safe pot"));
     return true;
   }
   Serial.println(F("not safe"));
